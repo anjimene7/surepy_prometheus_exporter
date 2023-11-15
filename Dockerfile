@@ -11,4 +11,4 @@ RUN apt-get update -y \
 
 ADD ./main.py /opt/app
 
-CMD python /opt/app/main.py
+CMD ["python", "-u", "/opt/app/main.py"]
