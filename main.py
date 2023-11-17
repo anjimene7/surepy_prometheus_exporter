@@ -25,13 +25,16 @@ class TimestampedGauge2(object):
         logger.info(f"Collecting data")
         data = extract_data()
         cat_feed = GaugeMetricFamily(name='surepy_pets_feeding', documentation='Pets feeding status', labels=["pet", "household_id"])
+        cat_feed_immediate = GaugeMetricFamily(name='surepy_pets_feeding_instant', documentation='Pets feeding status (last)', labels=["pet", "household_id"])
         feeder_food_status = GaugeMetricFamily('surepy_bowls_food', 'Bowls food status', labels=["pet", "household_id"])
         feeder_battery_status = GaugeMetricFamily('surepy_bowls_battery', 'Bowls battery status', labels=["pet", "household_id"])
         for k, v in data.items():
             for el in v:
                 if "feed" == k:
                     cat_feed.add_metric([str(el[0]), str(el[1])], str(el[2]), str(el[3]))
+                    cat_feed_immediate.add_metric([str(el[0]), str(el[1])], str(el[2]))
                     yield cat_feed
+                    yield cat_feed_immediate
                 elif "bowl" == k:
                     feeder_food_status.add_metric([str(el[0]), str(el[1])], str(el[2]))
                     feeder_battery_status.add_metric([str(el[0]), str(el[1])], str(el[3]))
