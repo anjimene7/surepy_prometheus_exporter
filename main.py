@@ -5,9 +5,10 @@ import time
 from typing import List, Dict
 from surepy import Surepy, EntityType
 from surepy.exceptions import SurePetcareConnectionError
-from prometheus_client import start_http_server
+from prometheus_client import start_http_server, Gauge
 from prometheus_client.core import GaugeMetricFamily, REGISTRY
 from sys import stdout
+
 
 # Define logger
 logger = logging.getLogger('surepy_prometheus_exporter')
@@ -18,31 +19,9 @@ consoleHandler = logging.StreamHandler(stdout) #set streamhandler to stdout
 consoleHandler.setFormatter(logFormatter)
 logger.addHandler(consoleHandler)
 
-class TimestampedGauge2(object):
-    def __init__(self):
-        self.cat_feed = GaugeMetricFamily(name='surepy_pets_feeding', documentation='Pets feeding status', labels=["pet", "household_id"])
-        self.cat_feed_immediate = GaugeMetricFamily(name='surepy_pets_feeding_instant', documentation='Pets feeding status (last)', labels=["pet", "household_id"])
-        self.feeder_food_status = GaugeMetricFamily('surepy_bowls_food', 'Bowls food status', labels=["pet", "household_id"])
-        self.feeder_battery_status = GaugeMetricFamily('surepy_bowls_battery', 'Bowls battery status', labels=["pet", "household_id"])
-
-    def collect(self):
-        surepy = Surepy(auth_token=environ.get("SUREPY_TOKEN"))
-        logger.info(f"Collecting data")
-        data = extract_data(surepy)
-        for k, v in data.items():
-            for el in v:
-                if "feed" == k:
-                    self.cat_feed.add_metric([str(el[0]), str(el[1])], str(el[2]), str(el[3]))
-                    self.cat_feed_immediate.add_metric([str(el[0]), str(el[1])], str(el[2]))
-                    yield self.cat_feed
-                    yield self.cat_feed_immediate
-                elif "bowl" == k:
-                    self.feeder_food_status.add_metric([str(el[0]), str(el[1])], str(el[2]))
-                    self.feeder_battery_status.add_metric([str(el[0]), str(el[1])], str(el[3]))
-                    yield self.feeder_battery_status
-                    yield self.feeder_food_status
-
-
+cat_feed_immediate = Gauge(name='surepy_pets_feeding_instant', documentation='Pets feeding status (last)', labelnames=["pet", "household_id"])
+feeder_food_status = Gauge('surepy_bowls_food', 'Bowls food status', labelnames=["pet", "household_id"])
+feeder_battery_status = Gauge('surepy_bowls_battery', 'Bowls battery status', labelnames=["pet", "household_id"])
 
 def extract_data(surepy) -> Dict[str, List]:
     result = {}
@@ -54,7 +33,7 @@ def extract_data(surepy) -> Dict[str, List]:
         logger.error(f"Error connecting to API, will retry ({count}/{retry_count})")
         if count >= retry_count:
             raise ConnectionError(f"Could not get connection to API after {count} retries. Exiting...")
-        time.sleep(600)
+        time.sleep(300)
         count += 1
     else:
         pets = [v for k, v in data.items() if v.type == EntityType.PET]
@@ -72,9 +51,18 @@ def extract_data(surepy) -> Dict[str, List]:
 if __name__ == '__main__':
     logger.info("Starting script")
     start_http_server(9000)
-    REGISTRY.register(TimestampedGauge2())
     while True:
-        time.sleep(1)
+        surepy = Surepy(auth_token=environ.get("SUREPY_TOKEN"))
+        data = extract_data(surepy)
+        for k, v in data.items():
+            if k == 'feed':
+                for val in v:
+                    cat_feed_immediate.labels(*val[0:2]).set(val[2])
+            else: # k == 'bowl'
+                for val in v:
+                    feeder_food_status.labels(*val[0:2]).set(val[2])
+                    feeder_battery_status.labels(*  val[0:2]).set(val[3])
+        time.sleep(30)
 
 
 
