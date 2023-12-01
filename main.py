@@ -97,14 +97,14 @@ def extract_data(surepy) -> Dict[str, List]:
 
 def set_metrics(output_household, output_pets, output_feeder_battery, output_feeder_food) -> None:
     for i in output_household:
-        household_status_metric.labels(*i['labels']).set(i['value'])
+        household_status_metric.labels(*i['labels'].values()).set(i['value'])
     for i in output_pets:
         timestruct = time.strptime(i['ts'], "%Y-%m-%dT%H:%M:%S%z")
         set_value_with_timestamp(pet_food_metric, i['labels'], i['value'], int(time.mktime(timestruct)))
     for i in output_feeder_battery:
-        feeder_battery_metric.labels(*i['labels']).set(i['value'])
+        feeder_battery_metric.labels(*i['labels'].values()).set(i['value'])
     for i in output_feeder_food:
-        feeder_food_metric.labels(*i['labels']).set(i['value'])
+        feeder_food_metric.labels(*i['labels'].values()).set(i['value'])
 
 
 if __name__ == '__main__':
