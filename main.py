@@ -50,25 +50,30 @@ def set_value_with_timestamp(metric, labels, value, timestamp):
     labels["timestamp"] = timestamp
     metric.labels(**labels).set(value)
 
-def get_household_and_pet_metrics(households: list[EntityType.HUB], pets: list[EntityType.PET]) -> (dict[str: dict, str: str], dict[str: dict, str: str]):
+def get_household_and_pet_metrics(households: list[EntityType.HUB], pets: list[EntityType.PET], feeders: list[EntityType.FEEDER]):
     output_household = []
     for household in households:
         report = asyncio.run(surepy.get_report(household.household_id))
         for el in households:
             output_household.append({'labels': {'serial': el.serial, 'name': el.name, 'household_id': el.household_id}, 'value': el.online})
         output_pets = []
+        output_feeder_history = []
         for el2 in report.get('data'):
             pet = [x for x in pets if x.id == el2.get('pet_id')]
-            if pet:
+            feeder = [x for x in feeders if x.id == el2.get('device_id')]
+            if pet and feeder:
                 pet = pet[0]
+                feeder = feeder[0]
             else:
-                raise ValueError(f"No pet found for id {el2.pet_id}")
+                raise ValueError(f"No pet found for id {el2.get('pet_id')} or device found for id {el2.get('device_id')}")
             feeding_datapoints = el2['feeding']['datapoints']
             feeding_datapoints_ts = [x['from'] for x in feeding_datapoints]
             feeding_datapoints_amount = [x['weights'][0]['change'] for x in feeding_datapoints]
-            for ts, eat_value in zip(feeding_datapoints_ts, feeding_datapoints_amount):
+            feeding_datapoints_weights = [x['weights'][0]['weight'] for x in feeding_datapoints]
+            for ts, eat_value, weight_value in zip(feeding_datapoints_ts, feeding_datapoints_amount, feeding_datapoints_weights):
                 output_pets.append({'labels': {'name': pet.name, 'household_id': pet.household_id, 'photo_url': pet.photo_url}, 'ts': ts, 'value': eat_value})
-    return output_household, output_pets
+                output_feeder_history.append({'labels': {'name': feeder.name, 'household_id': feeder.household_id, 'serial': feeder.serial}, 'ts': ts, 'value': weight_value})
+    return output_household, output_pets, output_feeder_history
 
 def get_feeder_metrics(data: list[EntityType.FEEDER]) -> dict:
     output_feeder_food, output_feeder_battery = [], []
@@ -93,9 +98,9 @@ def extract_data(surepy) -> Dict[str, List]:
         time.sleep(300)
         count += 1
     else:
-        output_household, output_pets = get_household_and_pet_metrics(households, pets)
+        output_household, output_pets, output_feeder_history = get_household_and_pet_metrics(households, pets, feeders)
         output_feeder_battery, output_feeder_food = get_feeder_metrics(feeders)
-    return output_household, output_pets, output_feeder_battery, output_feeder_food
+    return output_household, output_pets, output_feeder_history, output_feeder_battery, output_feeder_food
 
 
 def set_metrics(output_household, output_pets, output_feeder_battery, output_feeder_food) -> None:
@@ -112,17 +117,24 @@ def set_metrics(output_household, output_pets, output_feeder_battery, output_fee
         feeder_food_metric.labels(*i['labels'].values()).set(i['value'])
 
 
-def generate_csv_backfill(data):
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backfill.csv'), 'w', newline='') as f:
+def generate_csv_backfill(pet_data, feeder_data):
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backfill_pet.csv'), 'w', newline='') as f:
         writer = csv.writer(f, delimiter=',')
-        #writer.writerow(['name', 'household_id', 'photo_url', 'value', 'timestamp'])
-        for row in data:
+        for row in pet_data:
             writer.writerow([*row['labels'].values()]+[row['value'], (datetime.strptime(row['ts'], "%Y-%m-%dT%H:%M:%S%z")).strftime('%s')])
-    cmd = f"curl --data-binary @backfill.csv http://192.168.1.80:8428/api/v1/import/csv?format=1:label:name,2:label:household_id,3:label:photo_url,4:metric:surepy_pet_food,5:time:unix_s"
+    cmd_pet = f"curl --data-binary @backfill_pet.csv http://192.168.1.80:8428/api/v1/import/csv?format=1:label:name,2:label:household_id,3:label:photo_url,4:metric:surepy_pet_food,5:time:unix_s"
+
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backfill_feeder.csv'), 'w', newline='') as f:
+        writer = csv.writer(f, delimiter=',')
+        for row in feeder_data:
+            writer.writerow([*row['labels'].values()] + [row['value'], (datetime.strptime(row['ts'], "%Y-%m-%dT%H:%M:%S%z")).strftime('%s')])
+
+    cmd_feeder = f"curl --data-binary @backfill_feeder.csv http://192.168.1.80:8428/api/v1/import/csv?format=1:label:name,2:label:household_id,3:label:serial,4:metric:surepy_bowls_food,5:time:unix_s"
+
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backfill.sh'), 'w', newline='') as f:
-        f.write(cmd+'\n')
-    # curl -d "MSFT,3.21,1.67,NASDAQ" 'http://localhost:8428/api/v1/import/csv?format=2:metric:ask,3:metric:bid,1:label:ticker,4:label:market'
-    logger.info(f"Command to backfill history: {cmd}")
+        f.write(cmd_pet+'\n')
+        f.write(cmd_feeder+'\n')
+    logger.info(f"Command to backfill history: {cmd_pet}, {cmd_feeder}")
 
 
 
@@ -134,9 +146,9 @@ if __name__ == '__main__':
     initial_run = True
     while True:
         surepy = Surepy(auth_token=environ.get("SUREPY_TOKEN"))
-        output_household, output_pets, output_feeder_battery, output_feeder_food = extract_data(surepy)
+        output_household, output_pets, output_feeder_history, output_feeder_battery, output_feeder_food = extract_data(surepy)
         if initial_run:
-            generate_csv_backfill(output_pets)
+            generate_csv_backfill(output_pets, output_feeder_history)
         logger.info(f"Extracted metrics: pet food: {len(output_pets)}. Last scrape : {last_scrape}")
         last_scrape = datetime.now(timezone.utc)
         logger.debug(f"Extracted metrics: feeder battery: {output_feeder_battery}, feeder food: {output_feeder_food}, household: {output_household}, last pet timestamp: {output_pets[-1]}")
