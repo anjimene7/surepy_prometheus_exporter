@@ -70,8 +70,8 @@ def get_household_and_pet_metrics(households: list[EntityType.HUB], pets: list[E
 def get_feeder_metrics(data: list[EntityType.FEEDER]) -> dict:
     output_feeder_food, output_feeder_battery = [], []
     for feeder in data:
-        output_feeder_food.append({'labels': {'serial': feeder.serial, 'name': feeder.name, 'household_id': feeder.household_id}, 'value': feeder.total_weight})
-        output_feeder_battery.append({'labels': {'serial': feeder.serial, 'name': feeder.name, 'household_id': feeder.household_id}, 'value': feeder.battery_level})
+        output_feeder_food.append({'labels': {'name': feeder.name, 'household_id': feeder.household_id, 'serial': feeder.serial}, 'value': feeder.total_weight})
+        output_feeder_battery.append({'labels': {'name': feeder.name, 'household_id': feeder.household_id, 'serial': feeder.serial}, 'value': feeder.battery_level})
     return output_feeder_battery, output_feeder_food
 
 def extract_data(surepy) -> Dict[str, List]:
