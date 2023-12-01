@@ -115,12 +115,12 @@ def set_metrics(output_household, output_pets, output_feeder_battery, output_fee
 def generate_csv_backfill(data):
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backfill.csv'), 'w', newline='') as f:
         writer = csv.writer(f, delimiter=',')
-        writer.writerow(['name', 'household_id', 'photo_url', 'value', 'timestamp'])
+        #writer.writerow(['name', 'household_id', 'photo_url', 'value', 'timestamp'])
         for row in data:
             writer.writerow([*row['labels'].values()]+[row['value'], (datetime.strptime(row['ts'], "%Y-%m-%dT%H:%M:%S%z")).strftime('%s')])
-    cmd = f"curl -d @backfill.csv http://192.168.1.80:8428/api/v1/import/csv?format=1:label:name,2:label:household_id,3:label:photo_url,4:metric,5:time:unix_s"
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'command.txt'), 'w', newline='') as f:
-        f.write(cmd)
+    cmd = f"curl --data-binary @backfill.csv http://192.168.1.80:8428/api/v1/import/csv?format=1:label:name,2:label:household_id,3:label:photo_url,4:metric:surepy_pet_food,5:time:unix_s"
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backfill.sh'), 'w', newline='') as f:
+        f.write(cmd+'\n')
     # curl -d "MSFT,3.21,1.67,NASDAQ" 'http://localhost:8428/api/v1/import/csv?format=2:metric:ask,3:metric:bid,1:label:ticker,4:label:market'
     logger.info(f"Command to backfill history: {cmd}")
 
