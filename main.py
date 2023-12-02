@@ -3,16 +3,13 @@ import logging
 import os.path
 import traceback
 from os import environ
-import csv
-import base64
 import requests
-from datetime import datetime, timezone
+from datetime import datetime
 import time
 from typing import List, Dict
 from surepy import Surepy, EntityType
 from surepy.exceptions import SurePetcareConnectionError
 from prometheus_client import start_http_server, Gauge
-from prometheus_client.core import GaugeMetricFamily, REGISTRY
 from sys import stdout
 
 # Define logger
@@ -67,7 +64,6 @@ def get_feeder_metrics(data: list[EntityType.FEEDER]) -> dict:
     return output_feeder_battery, output_feeder_food
 
 def extract_data(surepy) -> Dict[str, List]:
-    result = {}
     count = 0
     retry_count = 7
     try:
@@ -98,34 +94,13 @@ def set_metrics(output_household, output_pets, output_feeder_battery, output_fee
         datetime_ts = datetime.strptime(i['ts'], "%Y-%m-%dT%H:%M:%S%z")
         datetime_ts_ms = int(datetime_ts.timestamp() * 1000)
         with open(already_written, 'r+') as f:
-            if f"{datetime_ts_ms},{i['value']}" not in f.read():
+            if f"{datetime_ts_ms},{i['labels']['name']},{i['value']}" not in f.read().split():
+                logger.info(f"Writing {datetime_ts_ms},{i['labels']['name']},{i['value']} to PushAway")
                 url = pushgateway_url.replace('prometheus', f'prometheus?timestamp={datetime_ts_ms}')
                 payload = f'surepy_pet_food{{monitor="my-project", name="{i["labels"]["name"]}", household_id="{i["labels"]["household_id"]}", photo_url="{i["labels"]["photo_url"]}"}} {i["value"]}'
-                #r = requests.post(url, payload)
-                #r.raise_for_status()
-                f.write(f"{datetime_ts_ms},{i['value']}\n")
-
-
-
-def generate_csv_backfill(pet_data, feeder_data):
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backfill_pet.csv'), 'w', newline='') as f:
-        writer = csv.writer(f, delimiter=',')
-        for row in pet_data:
-            writer.writerow([*row['labels'].values()]+[row['value'], (datetime.strptime(row['ts'], "%Y-%m-%dT%H:%M:%S%z")).strftime('%s')])
-    cmd_pet = f"curl --data-binary @backfill_pet.csv http://{hostname}:{port}/api/v1/import/csv?format=1:label:name,2:label:household_id,3:label:photo_url,4:metric:surepy_pet_food,5:time:unix_s"
-
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backfill_feeder.csv'), 'w', newline='') as f:
-        writer = csv.writer(f, delimiter=',')
-        for row in feeder_data:
-            writer.writerow([*row['labels'].values()] + [row['value'], (datetime.strptime(row['ts'], "%Y-%m-%dT%H:%M:%S%z")).strftime('%s')])
-
-    cmd_feeder = f"curl --data-binary @backfill_feeder.csv http://{hostname}:{port}/api/v1/import/csv?format=1:label:name,2:label:household_id,3:label:serial,4:metric:surepy_bowls_food,5:time:unix_s"
-
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backfill.sh'), 'w', newline='') as f:
-        f.write(cmd_pet+'\n')
-        f.write(cmd_feeder+'\n')
-    logger.info(f"Command to backfill history: {cmd_pet}, {cmd_feeder}")
-
+                r = requests.post(url, payload)
+                r.raise_for_status()
+                f.write(f"{datetime_ts_ms},{i['labels']['name']},{i['value']}\n")
 
 
 if __name__ == '__main__':
@@ -135,15 +110,12 @@ if __name__ == '__main__':
     hostname = '192.168.1.80'
     port = 8428
     pushgateway_url = url = f"http://{hostname}:{port}/api/v1/import/prometheus"
-    already_written = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.already_written.txt')
+    already_written = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'already_written.txt')
     if not os.path.exists(already_written):
         open(already_written, 'w').close()
-    #initial_run = True
     while True:
         surepy = Surepy(auth_token=environ.get("SUREPY_TOKEN"))
         output_household, output_pets, output_feeder_history, output_feeder_battery, output_feeder_food = extract_data(surepy)
-        #if initial_run:
-        #    generate_csv_backfill(output_pets, output_feeder_history)
         logger.info(f"Extracted metrics: pet food: {len(output_pets)}")
         logger.debug(f"Extracted metrics: feeder battery: {output_feeder_battery}, feeder food: {output_feeder_food}, household: {output_household}, last pet timestamp: {output_pets[-1]}")
         try:
@@ -152,7 +124,6 @@ if __name__ == '__main__':
             traceback.print_exc()
             logger.error(f"Issue setting metric: {e}")
         time.sleep(scrape_time)
-        #initial_run = False
 
 
 
