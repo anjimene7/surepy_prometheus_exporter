@@ -35,6 +35,9 @@ def get_household_and_pet_metrics(households: list[EntityType.HUB], pets: list[E
     output_household = []
     for household in households:
         report = asyncio.run(surepy.get_report(household.household_id))
+        if not report:
+            logger.error(f"Could not extract household report!")
+            return None, None, None
         for el in households:
             output_household.append({'labels': {'serial': el.serial, 'name': el.name, 'household_id': el.household_id}, 'value': el.online})
         output_pets = []
@@ -84,23 +87,27 @@ def extract_data(surepy) -> Dict[str, List]:
 
 
 def set_metrics(output_household, output_pets, output_feeder_battery, output_feeder_food) -> None:
-    for i in output_household:
-        household_status_metric.labels(*i['labels'].values()).set(i['value'])
-    for i in output_feeder_battery:
-        feeder_battery_metric.labels(*i['labels'].values()).set(i['value'])
-    for i in output_feeder_food:
-        feeder_food_metric.labels(*i['labels'].values()).set(i['value'])
-    for i in output_pets:
-        datetime_ts = datetime.strptime(i['ts'], "%Y-%m-%dT%H:%M:%S%z")
-        datetime_ts_ms = int(datetime_ts.timestamp() * 1000)
-        with open(already_written, 'r+') as f:
-            if f"{datetime_ts_ms},{i['labels']['name']},{i['value']}" not in f.read().split():
-                logger.info(f"Writing {datetime_ts_ms},{i['labels']['name']},{i['value']} to PushAway")
-                url = pushgateway_url.replace('prometheus', f'prometheus?timestamp={datetime_ts_ms}')
-                payload = f'surepy_pet_food{{monitor="my-project", name="{i["labels"]["name"]}", household_id="{i["labels"]["household_id"]}", photo_url="{i["labels"]["photo_url"]}"}} {i["value"]}'
-                r = requests.post(url, payload)
-                r.raise_for_status()
-                f.write(f"{datetime_ts_ms},{i['labels']['name']},{i['value']}\n")
+    if output_household is not None:
+        for i in output_household:
+            household_status_metric.labels(*i['labels'].values()).set(i['value'])
+    if output_feeder_battery is not None:
+        for i in output_feeder_battery:
+            feeder_battery_metric.labels(*i['labels'].values()).set(i['value'])
+    if output_feeder_food is not None:
+        for i in output_feeder_food:
+            feeder_food_metric.labels(*i['labels'].values()).set(i['value'])
+    if output_pets is not None:
+        for i in output_pets:
+            datetime_ts = datetime.strptime(i['ts'], "%Y-%m-%dT%H:%M:%S%z")
+            datetime_ts_ms = int(datetime_ts.timestamp() * 1000)
+            with open(already_written, 'r+') as f:
+                if f"{datetime_ts_ms},{i['labels']['name']},{i['value']}" not in f.read().split():
+                    logger.info(f"Writing {datetime_ts_ms},{i['labels']['name']},{i['value']} to PushAway")
+                    url = pushgateway_url.replace('prometheus', f'prometheus?timestamp={datetime_ts_ms}')
+                    payload = f'surepy_pet_food{{monitor="my-project", name="{i["labels"]["name"]}", household_id="{i["labels"]["household_id"]}", photo_url="{i["labels"]["photo_url"]}"}} {i["value"]}'
+                    r = requests.post(url, payload)
+                    r.raise_for_status()
+                    f.write(f"{datetime_ts_ms},{i['labels']['name']},{i['value']}\n")
 
 
 if __name__ == '__main__':
@@ -116,8 +123,9 @@ if __name__ == '__main__':
     while True:
         surepy = Surepy(auth_token=environ.get("SUREPY_TOKEN"))
         output_household, output_pets, output_feeder_history, output_feeder_battery, output_feeder_food = extract_data(surepy)
-        logger.info(f"Extracted metrics: pet food: {len(output_pets)}")
-        logger.debug(f"Extracted metrics: feeder battery: {output_feeder_battery}, feeder food: {output_feeder_food}, household: {output_household}, last pet timestamp: {output_pets[-1]}")
+        logger.info(f"Extracted metrics: pet food: {len(output_pets) if output_pets else 'None'}")
+        if output_feeder_battery and output_feeder_food and output_household and output_pets:
+            logger.debug(f"Extracted metrics: feeder battery: {output_feeder_battery}, feeder food: {output_feeder_food}, household: {output_household}, last pet timestamp: {output_pets[-1]}")
         try:
             set_metrics(output_household, output_pets, output_feeder_battery, output_feeder_food)
         except Exception as e:
