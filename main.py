@@ -289,7 +289,14 @@ class Device(SurepyDevicePrometheus):
         self.created_at = data['created_at']
         self.online = data['status']['online']
         self.version = data['status']['version']['device']
-        self.battery = data['status']['battery'] if self.product_id != SurepyDeviceType['HUB'] else 0
+        self.battery_voltage = data['status']['battery'] if self.product_id != SurepyDeviceType['HUB'] else 0
+        num_batteries = 4
+        voltage_max = 1.6
+        voltage_low = 1.2
+        voltage_diff = voltage_max - voltage_low
+        voltage_per_battery = self.battery_voltage / num_batteries
+        voltage_per_battery_diff = voltage_per_battery - voltage_low
+        self.battery = max(min(int(voltage_per_battery_diff / voltage_diff * 100), 100), 0)
         self.status = data['status']
         self.control = data['control']  # TODO: use these values in metric
         self.values.update({'surepy_device_status': self.online,
