@@ -74,7 +74,10 @@ class SurePetAPIClient:
 
     def load_object(self, endpoint: str, params: Optional[dict] = None) -> list:
         with self._request_and_validate(endpoint=endpoint, params=params) as data:
-            surepy_data = json.loads(data.text).get('data')
+            try:
+                surepy_data = json.loads(data.text).get('data')
+            except Exception as e:
+                logger.error(f"{e} -> {data}")
             surepy_data = surepy_data if isinstance(surepy_data, list) else [surepy_data]
         return surepy_data
 
