@@ -74,11 +74,11 @@ class SurePetAPIClient:
 
     def load_object(self, endpoint: str, params: Optional[dict] = None) -> list:
         with self._request_and_validate(endpoint=endpoint, params=params) as data:
-            try:
+            if data.reason == "No Content":
+                return []
+            else:
                 surepy_data = json.loads(data.text).get('data')
-            except Exception as e:
-                logger.error(f"{e} -> {data} -> {vars(data)}")
-            surepy_data = surepy_data if isinstance(surepy_data, list) else [surepy_data]
+                surepy_data = surepy_data if isinstance(surepy_data, list) else [surepy_data]
         return surepy_data
 
     def curlify(self, response: requests.Response) -> str:
@@ -149,7 +149,8 @@ class SurepyDevicePrometheus:
 
     def update_object_attributes(self, endpoint: str) -> None:
         data = client.load_object(f'{endpoint}/{self.id}')
-        self.set_attributes(data[0])
+        if data:
+            self.set_attributes(data[0])
 
     def _push_metric_to_gateway(self, metric: Gauge, element: dict) -> requests.Response:
         for _, row in element['value'].iterrows():
@@ -249,15 +250,17 @@ class Pet(SurepyDevicePrometheus):
             params = {'from': from_ts, 'to': to_ts}
             logger.info(f"Extracting report for range [{from_ts}] - [{to_ts}]")
             data = client.load_object(f'report/household/{self.household_id}/pet/{self.id}/device/{self.device_id}', params=params)
-            tmp.extend(data[0]['feeding']['datapoints'])
-            to_ts = from_ts
+            if data:
+                tmp.extend(data[0]['feeding']['datapoints'])
+                to_ts = from_ts
         if self.one_time_setup:
             self.one_time_setup = False
-        df_json = pd.DataFrame(tmp).explode('weights').to_json(orient='records')
-        report = pd.json_normalize(json.loads(df_json), meta=['weights'])
-        report.rename(columns={"weights.index": "bowl"}, inplace=True)
-        self.report_raw = report
-        self.report = report.groupby(['bowl', 'context'], as_index=False)
+        if tmp:
+            df_json = pd.DataFrame(tmp).explode('weights').to_json(orient='records')
+            report = pd.json_normalize(json.loads(df_json), meta=['weights'])
+            report.rename(columns={"weights.index": "bowl"}, inplace=True)
+            self.report_raw = report
+            self.report = report.groupby(['bowl', 'context'], as_index=False)
 
     def set_attributes(self, data: dict) -> None:
         super().set_attributes(data)
