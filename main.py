@@ -77,7 +77,7 @@ class SurePetAPIClient:
             try:
                 surepy_data = json.loads(data.text).get('data')
             except Exception as e:
-                logger.error(f"{e} -> {data}")
+                logger.error(f"{e} -> {data} -> {vars(data)}")
             surepy_data = surepy_data if isinstance(surepy_data, list) else [surepy_data]
         return surepy_data
 
