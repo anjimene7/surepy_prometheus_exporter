@@ -74,7 +74,6 @@ class SurePetAPIClient:
 
     def load_object(self, endpoint: str, params: Optional[dict] = None) -> list:
         with self._request_and_validate(endpoint=endpoint, params=params) as data:
-            meta = json.loads(data.text).get('meta')
             surepy_data = json.loads(data.text).get('data')
             surepy_data = surepy_data if isinstance(surepy_data, list) else [surepy_data]
         return surepy_data
